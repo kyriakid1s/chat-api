@@ -58,7 +58,7 @@ go-chat-api/
 ### Authentication (Public)
 - `POST /api/auth/register` - Register a new user
 - `POST /api/auth/login` - Login user and get JWT token
-- `POST /api/auth/refresh` - Refresh JWT token
+- `POST /api/auth/refresh` - Refresh JWT token (accepts header or cookie auth, refreshes within 15min of expiry)
 
 ### Authentication (Protected)
 - `POST /api/auth/logout` - Logout user (requires authentication)
@@ -281,6 +281,188 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   http://localhost:8080/api/messages
 ```
 
+## 🔄 Token Refresh Guide
+
+### When to Use Refresh Token
+
+The refresh endpoint (`POST /api/auth/refresh`) should be used to extend your session without requiring the user to login again.
+
+**Refresh Window**: Tokens can only be refreshed within the **last 15 minutes** before expiry (security feature).
+
+### Refresh Token Examples
+
+**Method A: Cookie-based refresh (Recommended)**
+```bash
+# Refresh using saved cookie - token automatically updates
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/api/auth/refresh
+```
+
+**Method B: Header-based refresh**
+```bash
+# Extract current token and refresh it
+TOKEN=$(curl -b cookies.txt http://localhost:8080/api/auth/profile 2>/dev/null | jq -r '.token // empty')
+curl -H "Authorization: Bearer $TOKEN" -X POST http://localhost:8080/api/auth/refresh
+```
+
+### Frontend Integration Examples
+
+**JavaScript (Cookie-based - Easiest)**
+```javascript
+// Automatic refresh - no token management needed
+async function refreshToken() {
+  try {
+    const response = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include' // Include cookies automatically
+    });
+    
+    if (response.ok) {
+      console.log('Token refreshed successfully');
+      return true;
+    } else {
+      console.log('Refresh failed:', await response.text());
+      return false;
+    }
+  } catch (error) {
+    console.error('Refresh error:', error);
+    return false;
+  }
+}
+
+// Auto-refresh before API calls
+async function makeApiCall(endpoint, options = {}) {
+  // First, try the API call
+  let response = await fetch(endpoint, {
+    ...options,
+    credentials: 'include'
+  });
+  
+  // If unauthorized, try to refresh and retry
+  if (response.status === 401) {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      // Retry the original request
+      response = await fetch(endpoint, {
+        ...options,
+        credentials: 'include'
+      });
+    } else {
+      // Redirect to login
+      window.location.href = '/login';
+      return;
+    }
+  }
+  
+  return response;
+}
+```
+
+**JavaScript (Header-based)**
+```javascript
+// Manual token management
+class ApiClient {
+  constructor() {
+    this.token = localStorage.getItem('jwt_token');
+    this.tokenExpiry = localStorage.getItem('token_expiry');
+  }
+  
+  async refreshToken() {
+    if (!this.token) return false;
+    
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        this.token = data.token;
+        this.tokenExpiry = data.expires_at;
+        
+        localStorage.setItem('jwt_token', this.token);
+        localStorage.setItem('token_expiry', this.tokenExpiry);
+        return true;
+      }
+    } catch (error) {
+      console.error('Refresh failed:', error);
+    }
+    
+    return false;
+  }
+  
+  async apiCall(endpoint, options = {}) {
+    // Check if token needs refresh (within 5 minutes of expiry)
+    const now = Date.now() / 1000;
+    if (this.tokenExpiry && (this.tokenExpiry - now < 300)) {
+      await this.refreshToken();
+    }
+    
+    return fetch(endpoint, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Authorization': `Bearer ${this.token}`
+      }
+    });
+  }
+}
+```
+
+### Best Practices
+
+1. **Automatic Refresh**: Check token expiry before API calls
+2. **Graceful Degradation**: Handle refresh failures by redirecting to login
+3. **Cookie Method**: Easier to implement and more secure
+4. **Timing**: Refresh tokens when they have < 15 minutes remaining
+5. **Error Handling**: Always handle 401 responses with refresh retry
+
+### Common Refresh Scenarios
+
+**Scenario 1: Long-running web application**
+```javascript
+// Check every 5 minutes if refresh is needed
+setInterval(async () => {
+  const tokenExpiry = localStorage.getItem('token_expiry');
+  const now = Date.now() / 1000;
+  
+  // Refresh if expiring in next 10 minutes
+  if (tokenExpiry && (tokenExpiry - now < 600)) {
+    await refreshToken();
+  }
+}, 5 * 60 * 1000); // Every 5 minutes
+```
+
+**Scenario 2: Before critical operations**
+```javascript
+async function sendImportantMessage(messageData) {
+  // Ensure fresh token before important operations
+  await refreshToken();
+  
+  return fetch('/api/messages', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(messageData)
+  });
+}
+```
+
+**Scenario 3: Mobile app background refresh**
+```javascript
+// React Native example
+import { AppState } from 'react-native';
+
+AppState.addEventListener('change', async (nextAppState) => {
+  if (nextAppState === 'active') {
+    // App came to foreground, check if token needs refresh
+    await refreshToken();
+  }
+});
+```
+
 ## Architecture
 
 This project follows clean architecture principles:
@@ -394,6 +576,9 @@ curl -c cookies.txt -X POST http://localhost:8080/api/auth/login -d '{"username"
 
 # Use saved cookies for subsequent requests
 curl -b cookies.txt http://localhost:8080/api/auth/profile
+
+# Test refresh token (only works when token expires in <15 minutes)
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/api/auth/refresh
 ```
 
 **Option 2: Token-based (manual token handling)**
@@ -401,7 +586,38 @@ curl -b cookies.txt http://localhost:8080/api/auth/profile
 # Extract token from login response and use in header
 TOKEN=$(curl -X POST http://localhost:8080/api/auth/login -d '{"username":"user","password":"pass"}' | jq -r '.token')
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/auth/profile
+
+# Test refresh token
+NEW_TOKEN=$(curl -H "Authorization: Bearer $TOKEN" -X POST http://localhost:8080/api/auth/refresh | jq -r '.token')
 ```
+
+### Testing Refresh Token Functionality
+
+**⚠️ Note**: Refresh only works when tokens are within 15 minutes of expiry.
+
+**For Development Testing**, you can temporarily modify the refresh window:
+
+1. Edit `internal/auth/auth.go` line 93:
+```go
+// Change from 15 minutes to 23 hours for testing
+if time.Until(claims.ExpiresAt.Time) > 23*time.Hour {
+```
+
+2. Restart server and test:
+```bash
+# Login and save cookie
+curl -c cookies.txt -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser","password":"password123"}'
+
+# Test refresh (should work with modified time window)
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/api/auth/refresh
+
+# Verify cookie was updated
+cat cookies.txt
+```
+
+3. **Remember to revert** the change for production!
 
 ### Running Tests
 

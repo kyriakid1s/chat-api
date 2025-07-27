@@ -91,15 +91,24 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // RefreshToken handles POST /api/auth/refresh
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var tokenString string
+
+	// Try to get token from Authorization header first
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		http.Error(w, "Authorization header required", http.StatusUnauthorized)
-		return
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		// Fall back to cookie if no Authorization header
+		cookie, err := r.Cookie("jwt_token")
+		if err != nil {
+			http.Error(w, "Authorization header or jwt_token cookie required", http.StatusUnauthorized)
+			return
+		}
+		tokenString = cookie.Value
 	}
 
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	if tokenString == authHeader {
-		http.Error(w, "Bearer token required", http.StatusUnauthorized)
+	if tokenString == "" {
+		http.Error(w, "Token required", http.StatusUnauthorized)
 		return
 	}
 
@@ -108,6 +117,18 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+
+	// Update the JWT cookie with the new token
+	cookie := &http.Cookie{
+		Name:     "jwt_token",
+		Value:    authResponse.Token,
+		Path:     "/",
+		MaxAge:   24 * 60 * 60, // 24 hours in seconds
+		HttpOnly: true,         // Prevents XSS attacks
+		Secure:   false,        // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authResponse)
