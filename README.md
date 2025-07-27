@@ -110,7 +110,7 @@ chat-api/
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/kyriakid1s/chat-api
 cd chat-api
 
 # Run the automated setup script (recommended)
