@@ -1029,7 +1029,7 @@ Multi-layered security approach:
 
 ```bash
 # Clone and setup
-git clone <repository-url>
+git clone https://github.com/kyriakid1s/chat-api
 cd chat-api
 ./scripts/setup.sh
 
