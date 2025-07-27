@@ -4,12 +4,13 @@ import (
 	"go-chat-api/internal/auth"
 	"go-chat-api/internal/handlers"
 	"go-chat-api/internal/middleware"
+	"net/http"
 
 	"github.com/gorilla/mux"
 )
 
 // SetupRoutes configures all API routes
-func SetupRoutes(chatHandler *handlers.ChatHandler, authHandler *handlers.AuthHandler, authService *auth.AuthService) *mux.Router {
+func SetupRoutes(chatHandler *handlers.ChatHandler, authHandler *handlers.AuthHandler, wsHandler *handlers.WebSocketHandler, authService *auth.AuthService) *mux.Router {
 	router := mux.NewRouter()
 
 	// API prefix
@@ -26,6 +27,15 @@ func SetupRoutes(chatHandler *handlers.ChatHandler, authHandler *handlers.AuthHa
 	authProtected.Use(middleware.AuthMiddleware(authService))
 	authProtected.HandleFunc("/logout", authHandler.Logout).Methods("POST")
 	authProtected.HandleFunc("/profile", authHandler.GetProfile).Methods("GET")
+
+	// WebSocket routes (authentication required)
+	ws := api.PathPrefix("/ws").Subrouter()
+	ws.Use(middleware.AuthMiddleware(authService))
+	ws.HandleFunc("/connect", wsHandler.HandleWebSocket).Methods("GET")
+	ws.HandleFunc("/users", wsHandler.GetConnectedUsers).Methods("GET")
+
+	// Serve static files (test client)
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir("./"))).Methods("GET")
 
 	// Protected message routes (authentication required)
 	messages := api.PathPrefix("/messages").Subrouter()

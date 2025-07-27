@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Chat API WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .chat-box {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .message.sent {
+            background: #e3f2fd;
+            text-align: right;
+        }
+
+        .message.received {
+            background: #f3e5f5;
+        }
+
+        .message.system {
+            background: #e8f5e8;
+            font-style: italic;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        .input-group input {
+            flex: 1;
+            padding: 8px;
+        }
+
+        .input-group button {
+            padding: 8px 15px;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+
+        .status.connected {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .status.disconnected {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .auth-section {
+            background: #f5f5f5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🚀 Chat API WebSocket Test</h1>
+
+        <!-- Authentication Section -->
+        <div class="auth-section">
+            <h3>Authentication</h3>
+            <div class="input-group">
+                <input type="text" id="username" placeholder="Username" value="testuser">
+                <input type="password" id="password" placeholder="Password" value="password123">
+                <button onclick="login()">Login</button>
+                <button onclick="logout()">Logout</button>
+            </div>
+            <div id="auth-status" class="status disconnected">Not authenticated</div>
+        </div>
+
+        <!-- WebSocket Connection -->
+        <div class="input-group">
+            <button onclick="connect()">Connect WebSocket</button>
+            <button onclick="disconnect()">Disconnect</button>
+            <span id="connection-status" class="status disconnected">Disconnected</span>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="chat-box" id="chatBox"></div>
+
+        <div class="input-group">
+            <input type="text" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
+            <input type="text" id="recipientInput" placeholder="Recipient (optional)">
+            <button onclick="sendMessage()">Send Message</button>
+        </div>
+
+        <!-- Connected Users -->
+        <div class="input-group">
+            <button onclick="getConnectedUsers()">Get Connected Users</button>
+            <span id="user-count">Users: 0</span>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let token = null;
+
+        // Authentication functions
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.token;
+                    document.getElementById('auth-status').className = 'status connected';
+                    document.getElementById('auth-status').textContent = `Authenticated as ${data.user.username}`;
+                    addMessage('system', 'Login successful');
+                } else {
+                    const error = await response.text();
+                    addMessage('system', `Login failed: ${error}`);
+                }
+            } catch (error) {
+                addMessage('system', `Login error: ${error.message}`);
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+
+                token = null;
+                document.getElementById('auth-status').className = 'status disconnected';
+                document.getElementById('auth-status').textContent = 'Not authenticated';
+                addMessage('system', 'Logged out');
+                disconnect();
+            } catch (error) {
+                addMessage('system', `Logout error: ${error.message}`);
+            }
+        }
+
+        // WebSocket functions
+        function connect() {
+            if (ws) {
+                addMessage('system', 'Already connected');
+                return;
+            }
+
+            // Use cookie authentication - cookies should be sent automatically
+            const wsUrl = `ws://localhost:8080/api/ws/connect`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function () {
+                document.getElementById('connection-status').className = 'status connected';
+                document.getElementById('connection-status').textContent = 'Connected';
+                addMessage('system', 'WebSocket connected');
+            };
+
+            ws.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+
+            ws.onclose = function () {
+                document.getElementById('connection-status').className = 'status disconnected';
+                document.getElementById('connection-status').textContent = 'Disconnected';
+                addMessage('system', 'WebSocket disconnected');
+                ws = null;
+            };
+
+            ws.onerror = function (error) {
+                addMessage('system', `WebSocket error: ${error}`);
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage() {
+            if (!ws) {
+                addMessage('system', 'Not connected to WebSocket');
+                return;
+            }
+
+            const content = document.getElementById('messageInput').value;
+            const recipient = document.getElementById('recipientInput').value;
+
+            if (!content.trim()) return;
+
+            const message = {
+                type: 'message',
+                content: content,
+                recipient: recipient || undefined
+            };
+
+            ws.send(JSON.stringify(message));
+            document.getElementById('messageInput').value = '';
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'connection':
+                    addMessage('system', `Connected as user ${data.user_id}`);
+                    break;
+                case 'message':
+                case 'direct_message':
+                    const msg = data.message;
+                    const isOwnMessage = msg.sender === document.getElementById('username').value;
+                    addMessage(isOwnMessage ? 'sent' : 'received',
+                        `${msg.sender}: ${msg.content}${msg.recipient ? ` (to ${msg.recipient})` : ''}`);
+                    break;
+                case 'error':
+                    addMessage('system', `Error: ${data.error}`);
+                    break;
+                case 'pong':
+                    addMessage('system', 'Pong received');
+                    break;
+                default:
+                    addMessage('system', `Unknown message type: ${data.type}`);
+            }
+        }
+
+        async function getConnectedUsers() {
+            try {
+                const response = await fetch('/api/ws/users', {
+                    credentials: 'include'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('user-count').textContent = `Users: ${data.count}`;
+                    addMessage('system', `Connected users: ${data.connected_users.join(', ') || 'none'}`);
+                } else {
+                    addMessage('system', 'Failed to get connected users');
+                }
+            } catch (error) {
+                addMessage('system', `Error getting users: ${error.message}`);
+            }
+        }
+
+        function addMessage(type, content) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = `[${new Date().toLocaleTimeString()}] ${content}`;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Send ping every 30 seconds to keep connection alive
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+    </script>
+</body>
+
+</html>

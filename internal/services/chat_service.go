@@ -36,10 +36,16 @@ func (s *ChatService) SendMessage(req models.MessageRequest) (*models.Message, e
 		return nil, err
 	}
 
+	// Convert empty recipient to empty string for JSON, but handle NULL in database
+	recipient := req.Recipient
+	if recipient == "" {
+		recipient = "" // Keep empty for JSON response, but database layer will handle NULL
+	}
+
 	message := models.Message{
 		ID:        id,
 		Sender:    req.Sender,
-		Recipient: req.Recipient,
+		Recipient: recipient,
 		Content:   req.Content,
 		RoomID:    req.RoomID,
 		Timestamp: time.Now(),

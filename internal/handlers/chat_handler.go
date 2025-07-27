@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go-chat-api/internal/models"
 	"go-chat-api/internal/services"
+	"go-chat-api/internal/websocket"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -12,12 +13,14 @@ import (
 // ChatHandler handles HTTP requests for chat operations
 type ChatHandler struct {
 	chatService *services.ChatService
+	hub         *websocket.Hub // WebSocket hub for live messaging
 }
 
 // NewChatHandler creates a new chat handler with injected dependencies
-func NewChatHandler(chatService *services.ChatService) *ChatHandler {
+func NewChatHandler(chatService *services.ChatService, hub *websocket.Hub) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
+		hub:         hub,
 	}
 }
 
@@ -33,6 +36,21 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Broadcast the message to WebSocket clients
+	if h.hub != nil {
+		if req.RoomID != "" {
+			// Room message
+			h.hub.SendToRoom(req.RoomID, message)
+		} else if req.Recipient != "" {
+			// Direct message - send to recipient and sender
+			h.hub.SendToUser(req.Recipient, message)
+			h.hub.SendToUser(req.Sender, message)
+		} else {
+			// Global message
+			h.hub.BroadcastMessage(message)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

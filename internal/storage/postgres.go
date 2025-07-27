@@ -105,7 +105,14 @@ func (p *PostgresDB) AddMessage(message models.Message) error {
 		roomID = message.RoomID
 	}
 
-	_, err := p.db.Exec(query, message.ID, message.Sender, message.Recipient,
+	var recipient interface{}
+	if message.Recipient == "" {
+		recipient = nil
+	} else {
+		recipient = message.Recipient
+	}
+
+	_, err := p.db.Exec(query, message.ID, message.Sender, recipient,
 		message.Content, message.Timestamp, roomID)
 	if err != nil {
 		return fmt.Errorf("failed to add message: %w", err)
@@ -114,7 +121,7 @@ func (p *PostgresDB) AddMessage(message models.Message) error {
 } // GetMessages retrieves all messages from the database
 func (p *PostgresDB) GetMessages() ([]models.Message, error) {
 	query := `
-		SELECT id, sender, recipient, content, timestamp, COALESCE(room_id, '') as room_id
+		SELECT id, sender, COALESCE(recipient, '') as recipient, content, timestamp, COALESCE(room_id, '') as room_id
 		FROM messages
 		ORDER BY timestamp ASC
 	`

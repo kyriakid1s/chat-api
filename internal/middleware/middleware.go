@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"go-chat-api/internal/auth"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -33,10 +35,37 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Hijack implements the http.Hijacker interface for WebSocket support
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
 // CORSMiddleware handles CORS headers
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // More specific for security
+		// Allow multiple origins for development
+		origin := r.Header.Get("Origin")
+		allowedOrigins := []string{
+			"http://localhost:3000",
+			"http://localhost:8080",
+			"http://127.0.0.1:8080",
+		}
+
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+
+		// If no origin header (same-origin requests), allow it
+		if origin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true") // Allow cookies
