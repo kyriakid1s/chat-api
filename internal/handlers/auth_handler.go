@@ -73,6 +73,18 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set JWT token as HTTP-only cookie
+	cookie := &http.Cookie{
+		Name:     "jwt_token",
+		Value:    authResponse.Token,
+		Path:     "/",
+		MaxAge:   24 * 60 * 60, // 24 hours in seconds
+		HttpOnly: true,         // Prevents XSS attacks
+		Secure:   false,        // Set to true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authResponse)
 }
@@ -115,6 +127,18 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Clear the JWT cookie
+	cookie := &http.Cookie{
+		Name:     "jwt_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1, // Expire immediately
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out successfully"})

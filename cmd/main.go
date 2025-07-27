@@ -16,14 +16,18 @@ func main() {
 	// Load configuration
 	cfg := config.LoadConfig()
 
-	// Initialize storage (dependency injection)
-	storage := storage.NewInMemoryStorage()
+	// Initialize PostgreSQL storage
+	db, err := storage.NewPostgresDB(cfg.GetDatabaseConnectionString())
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+	defer db.Close()
 
 	// Initialize auth service
 	authService := auth.NewAuthService(cfg.JWTSecret, cfg.JWTExpiry)
 
 	// Initialize services with dependency injection
-	chatService := services.NewChatService(storage, storage, storage, authService)
+	chatService := services.NewChatService(db, db, db, authService)
 
 	// Initialize handlers with dependency injection
 	chatHandler := handlers.NewChatHandler(chatService)
@@ -38,6 +42,7 @@ func main() {
 	// Start server
 	log.Printf("Starting chat API server on port %s", cfg.Port)
 	log.Printf("Environment: %s", cfg.Environment)
+	log.Printf("Database: Connected to PostgreSQL")
 
 	if err := http.ListenAndServe(":"+cfg.Port, handler); err != nil {
 		log.Fatal("Server failed to start:", err)

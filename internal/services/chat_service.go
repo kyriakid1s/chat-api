@@ -94,12 +94,16 @@ func (s *ChatService) CreateUser(username, email string) (*models.User, error) {
 // RegisterUser creates a new user with authentication
 func (s *ChatService) RegisterUser(req models.RegisterRequest) (*models.User, error) {
 	// Check if username already exists
-	if _, err := s.userStore.GetUserByUsername(req.Username); err == nil {
+	if existingUser, err := s.userStore.GetUserByUsername(req.Username); err != nil {
+		return nil, err
+	} else if existingUser != nil {
 		return nil, errors.New("username already exists")
 	}
 
 	// Check if email already exists
-	if _, err := s.userStore.GetUserByEmail(req.Email); err == nil {
+	if existingUser, err := s.userStore.GetUserByEmail(req.Email); err != nil {
+		return nil, err
+	} else if existingUser != nil {
 		return nil, errors.New("email already exists")
 	}
 
@@ -137,6 +141,9 @@ func (s *ChatService) AuthenticateUser(req models.AuthRequest) (*models.AuthResp
 	// Find user by username
 	user, err := s.userStore.GetUserByUsername(req.Username)
 	if err != nil {
+		return nil, errors.New("invalid credentials")
+	}
+	if user == nil {
 		return nil, errors.New("invalid credentials")
 	}
 
